@@ -1,6 +1,7 @@
 import numpy as np
 import random
 
+
 class RoundRobinLB:
     def __init__(self):
         self.idx = 0

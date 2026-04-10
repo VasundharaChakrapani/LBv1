@@ -7,6 +7,7 @@ from sklearn.ensemble import RandomForestRegressor
 import pickle
 import random
 
+
 data_log = []
 
 # Multi-run training with random server speeds
@@ -19,7 +20,7 @@ for _ in range(10):
     ]
     rr_lb = RoundRobinLB()
     env.process(traffic_generator(env, servers, rr_lb, data_log))
-    env.run(until=100)
+    env.run(until=10000) # longer run for more data- 10000 simulation time units-collects more diverse data
 
 df = pd.DataFrame(data_log)
 features = ['cpu', 'mem', 'connections']

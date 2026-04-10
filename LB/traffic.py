@@ -1,5 +1,6 @@
 import random
 
+
 def traffic_generator(env, servers, lb, data_log, duration=100):
     while env.now < duration:
         # Burst traffic periods

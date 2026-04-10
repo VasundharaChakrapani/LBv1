@@ -6,6 +6,7 @@ from servers import Server
 from traffic import traffic_generator
 from loadbalancers import RoundRobinLB, LeastConnectionsLB, MLLB
 
+
 # Load ML model
 with open("rf_model.pkl", "rb") as f:
     rf = pickle.load(f)

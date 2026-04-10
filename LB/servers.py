@@ -1,6 +1,7 @@
 import simpy
 import random
 
+
 class Server:
     def __init__(self, env, name, speed_factor=1.0):
         self.env = env
