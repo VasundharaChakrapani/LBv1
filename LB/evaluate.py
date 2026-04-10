@@ -5,7 +5,7 @@ import pickle
 from servers import Server
 from traffic import traffic_generator
 from loadbalancers import RoundRobinLB, LeastConnectionsLB, MLLB
-
+from trainmodel import rf
 
 # Load ML model
 with open("rf_model.pkl", "rb") as f:
@@ -33,6 +33,7 @@ results = {}
 results['RoundRobin'] = evaluate_lb(RoundRobinLB)
 results['LeastConnections'] = evaluate_lb(LeastConnectionsLB)
 results['MLLB'] = evaluate_lb(MLLB, rf)
+results['RLLB (Balanced)'] = evaluate_lb(lambda model: MLLB(model, cpu_penalty=0.5), rf)
 
 # Print results
 for lb, metrics in results.items():

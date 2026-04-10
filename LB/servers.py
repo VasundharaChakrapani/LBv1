@@ -16,7 +16,8 @@ class Server:
         self.connections += 1
         self.cpu += random.uniform(5, 15)
         self.mem += random.uniform(1, 5)
-        adjusted_time = req_time / self.speed_factor  # slower/faster server
+        load_factor = 1 + (self.connections * 0.1)
+        adjusted_time = (req_time * load_factor) / self.speed_factor
         yield self.env.timeout(adjusted_time)
         self.cpu -= random.uniform(5, 15)
         self.mem -= random.uniform(1, 5)

@@ -5,6 +5,7 @@ import random
 class RoundRobinLB:
     def __init__(self):
         self.idx = 0
+        self.epsilon = 0.1  # exploration rate for RL
 
     def route_request(self, env, servers, data_log):
         server = servers[self.idx % len(servers)]
@@ -20,6 +21,7 @@ class RoundRobinLB:
             'connections': server.connections,
             'response_time': env.now - start
         })
+        self.epsilon = max(0.01, self.epsilon * 0.999)  # decay exploration
 
 class LeastConnectionsLB:
     def route_request(self, env, servers, data_log):
@@ -65,3 +67,83 @@ class MLLB:
             'connections': server.connections,
             'response_time': env.now - start
         })
+
+class RLLB:
+    def __init__(self, epsilon=0.1):
+        self.q_table = {}  # state -> [Q values for each server]
+        self.epsilon = epsilon  # exploration rate
+
+    def get_state(self, servers):
+        state = []
+        for s in servers:
+            cpu_bucket = max(0, min(int(s.cpu / 20), 5))
+            conn_bucket = max(0, min(int(s.connections / 5), 5))
+            state.append((cpu_bucket, conn_bucket))
+            return tuple(state)
+
+    def choose_action(self, state, servers):
+        import random
+
+        # Exploration
+        if random.random() < self.epsilon:
+            return random.randint(0, len(servers)-1)
+
+        # Exploitation
+        if state not in self.q_table:
+            self.q_table[state] = [0]*len(servers)
+        q_values = self.q_table[state]
+        max_q = max(q_values)
+
+        best_actions = [i for i, q in enumerate(q_values) if q == max_q]
+        return random.choice(best_actions)
+
+    def update_q(self, state, action, reward, next_state):
+        alpha = 0.1  # learning rate
+        gamma = 0.9  # discount factor
+
+        if state not in self.q_table:
+            self.q_table[state] = [0]*3
+        if next_state not in self.q_table:
+            self.q_table[next_state] = [0]*3
+
+        old_value = self.q_table[state][action]
+        next_max = max(self.q_table[next_state])
+
+        # Q-learning update
+        self.q_table[state][action] = old_value + alpha * (
+            reward + gamma * next_max - old_value
+        )
+
+    def route_request(self, env, servers, data_log):
+        state = self.get_state(servers)
+        if len(self.q_table) < 50:
+            action = random.randint(0, len(servers)-1)
+        else:
+            action = self.choose_action(state, servers)
+        server = servers[action]
+        req_time = random.uniform(1, 3)
+        start = env.now
+        yield env.process(server.handle_request(req_time))
+        response_time = env.now - start
+        avg_cpu = np.mean([s.cpu for s in servers])
+        imbalance = abs(server.cpu - avg_cpu)
+
+        reward = -response_time - 0.1 * imbalance
+        reward = reward / 10.0  # normalize
+
+        next_state = self.get_state(servers)
+        self.update_q(state, action, reward, next_state)
+
+        data_log.append({
+        'time': env.now,
+        'server': server.name,
+        'cpu': server.cpu,
+        'mem': server.mem,
+        'connections': server.connections,
+        'response_time': response_time
+    })
+
+        print(f"[RL] State={state}, Action=S{action}, Reward={reward:.2f}")
+
+    # Faster decay
+        self.epsilon = max(0.01, self.epsilon * 0.99)
