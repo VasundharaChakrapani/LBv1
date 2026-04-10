@@ -147,3 +147,111 @@ class RLLB:
 
     # Faster decay
         self.epsilon = max(0.01, self.epsilon * 0.99)
+
+# class RLLB:
+#     def __init__(self, epsilon=0.2):
+#         self.q_table = {}
+#         self.epsilon = epsilon
+
+#     # -----------------------------
+#     # FIXED STATE REPRESENTATION
+#     # -----------------------------
+#     def get_state(self, servers):
+#         state = []
+#         for s in servers:
+#             cpu_bucket = int(s.cpu // 20)
+#             conn_bucket = int(s.connections // 3)
+
+#             cpu_bucket = min(cpu_bucket, 5)
+#             conn_bucket = min(conn_bucket, 5)
+
+#             state.append((cpu_bucket, conn_bucket))
+
+#         return tuple(state)   # ✅ moved OUTSIDE loop
+
+#     # -----------------------------
+#     # ACTION SELECTION
+#     # -----------------------------
+#     def choose_action(self, state, n_servers):
+#         if random.random() < self.epsilon:
+#             return random.randint(0, n_servers - 1)
+
+#         if state not in self.q_table:
+#             self.q_table[state] = [0] * n_servers
+
+#         q_values = self.q_table[state]
+#         max_q = max(q_values)
+
+#         best_actions = [i for i, q in enumerate(q_values) if q == max_q]
+#         return random.choice(best_actions)
+
+#     # -----------------------------
+#     # Q UPDATE (FIXED)
+#     # -----------------------------
+#     def update_q(self, state, action, reward, next_state, n_servers):
+#         alpha = 0.1
+#         gamma = 0.9
+
+#         if state not in self.q_table:
+#             self.q_table[state] = [0] * n_servers
+#         if next_state not in self.q_table:
+#             self.q_table[next_state] = [0] * n_servers
+
+#         old_value = self.q_table[state][action]
+#         next_max = max(self.q_table[next_state])
+
+#         self.q_table[state][action] = old_value + alpha * (
+#             reward + gamma * next_max - old_value
+#         )
+
+#     # -----------------------------
+#     # MAIN ROUTING FUNCTION
+#     # -----------------------------
+#     def route_request(self, env, servers, data_log):
+#         n_servers = len(servers)
+
+#         state = self.get_state(servers)
+
+#         # Warmup phase (important)
+#         if len(self.q_table) < 50:
+#             action = random.randint(0, n_servers - 1)
+#         else:
+#             action = self.choose_action(state, n_servers)
+
+#         server = servers[action]
+
+#         req_time = random.uniform(1, 3)
+#         start = env.now
+
+#         yield env.process(server.handle_request(req_time))
+
+#         response_time = env.now - start
+
+#         # -----------------------------
+#         # FIXED REWARD FUNCTION 🔥
+#         # -----------------------------
+#         avg_cpu = np.mean([s.cpu for s in servers])
+#         avg_conn = np.mean([s.connections for s in servers])
+
+#         imbalance = abs(server.cpu - avg_cpu) + abs(server.connections - avg_conn)
+
+#         reward = -(response_time + 0.2 * imbalance)
+#         reward = reward / 5.0  # normalize
+
+#         next_state = self.get_state(servers)
+
+#         self.update_q(state, action, reward, next_state, n_servers)
+
+#         data_log.append({
+#             'time': env.now,
+#             'server': server.name,
+#             'cpu': server.cpu,
+#             'mem': server.mem,
+#             'connections': server.connections,
+#             'response_time': response_time
+#         })
+
+#         print(f"[RL] State={state}, Action=S{action}, Reward={reward:.2f}")
+
+#         # smoother decay
+#         self.epsilon = max(0.05, self.epsilon * 0.995)
