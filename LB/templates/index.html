@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Load Balancer Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 20px;
+            background: #0f172a;
+            color: white;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .controls button {
+            margin: 5px;
+            padding: 10px;
+            border: none;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        .controls button:hover {
+            background: #1d4ed8;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 15px;
+            margin: 10px;
+            border-radius: 10px;
+        }
+
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+        }
+
+        .metric {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        #trafficLog {
+            height: 200px;
+            overflow-y: scroll;
+            background: black;
+            padding: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>🚀 Load Balancer Simulation Dashboard</h1>
+
+<!-- CONTROLS -->
+<div class="controls">
+    <button onclick="runBaseline()">Run Baseline</button>
+    <button onclick="trainML()">Train ML</button>
+    <button onclick="trainRL()">Train RL</button>
+    <button onclick="runSmart('ml')">Run ML</button>
+    <button onclick="runSmart('rl')">Run RL</button>
+    <button onclick="resetSystem()">Reset</button>
+</div>
+
+<!-- METRICS -->
+<div class="grid">
+    <div class="card metric"><h3>Baseline</h3><pre id="baselineMetrics"></pre></div>
+    <div class="card metric"><h3>ML</h3><pre id="mlMetrics"></pre></div>
+    <div class="card metric"><h3>RL</h3><pre id="rlMetrics"></pre></div>
+</div>
+
+<!-- GRAPH -->
+<div class="card">
+    <canvas id="latencyChart"></canvas>
+</div>
+
+<!-- TRAFFIC -->
+<div class="card">
+    <h3>📡 Live Traffic</h3>
+    <div id="trafficLog"></div>
+</div>
+
+<script>
+let chart;
+
+// -----------------------------
+// API CALLS
+// -----------------------------
+function runBaseline() {
+    fetch('/run/baseline', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({traffic: 'mixed'})})
+    .then(() => alert("Baseline done"));
+}
+
+function trainML() {
+    fetch('/train/ml', {method: 'POST'})
+    .then(() => alert("ML trained"));
+}
+
+function trainRL() {
+    fetch('/train/rl', {method: 'POST'})
+    .then(() => alert("RL trained"));
+}
+
+function runSmart(type) {
+    fetch('/run/smart', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({strategy: type, traffic: 'mixed'})
+    })
+    .then(() => alert(type + " simulation done"));
+}
+
+function resetSystem() {
+    fetch('/reset', {method: 'POST'})
+    .then(() => {
+        alert("Reset complete");
+        document.getElementById("trafficLog").innerHTML = "";
+    });
+}
+
+// -----------------------------
+// METRICS
+// -----------------------------
+function loadMetrics() {
+    fetch('/metrics')
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById("baselineMetrics").innerText = JSON.stringify(data.baseline, null, 2);
+        document.getElementById("mlMetrics").innerText = JSON.stringify(data.ml, null, 2);
+        document.getElementById("rlMetrics").innerText = JSON.stringify(data.rl, null, 2);
+
+        updateChart(data);
+    });
+}
+
+// -----------------------------
+// CHART
+// -----------------------------
+function updateChart(data) {
+    const labels = ["Baseline", "ML", "RL"];
+
+    const avgRT = [
+        data.baseline?.avg_rt || 0,
+        data.ml?.avg_rt || 0,
+        data.rl?.avg_rt || 0
+    ];
+
+    if (chart) chart.destroy();
+
+    const ctx = document.getElementById('latencyChart').getContext('2d');
+
+    chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Avg Latency',
+                data: avgRT
+            }]
+        }
+    });
+}
+
+// -----------------------------
+// TRAFFIC STREAM
+// -----------------------------
+function streamTraffic() {
+    setInterval(() => {
+        fetch('/traffic')
+        .then(res => res.json())
+        .then(data => {
+            if (!data.server) return;
+
+            const log = document.getElementById("trafficLog");
+
+            const msg = `Req ${data.request_id} → ${data.server} (${data.status}) ${data.fallback ? "⚠️ fallback" : ""}`;
+            
+            log.innerHTML += msg + "<br>";
+            log.scrollTop = log.scrollHeight;
+        });
+    }, 500);
+}
+
+// -----------------------------
+// AUTO LOAD
+// -----------------------------
+setInterval(loadMetrics, 3000);
+streamTraffic();
+</script>
+
+</body>
+</html>

@@ -1,57 +1,158 @@
 import simpy
 import pandas as pd
-import matplotlib.pyplot as plt
 import pickle
+
 from servers import Server
 from traffic import traffic_generator
-from loadbalancers import RoundRobinLB, LeastConnectionsLB, MLLB
-from trainmodel import rf
+from loadbalancers import RoundRobinLB, LeastConnectionsLB, MLLB, RLLB
 
-# Load ML model
-with open("rf_model.pkl", "rb") as f:
-    rf = pickle.load(f)
 
-def evaluate_lb(lb_class, model=None):
+# -----------------------------
+# LOAD ML MODEL
+# -----------------------------
+try:
+    with open("rf_model.pkl", "rb") as f:
+        rf = pickle.load(f)
+except:
+    rf = None
+
+
+# -----------------------------
+# 🔧 CORE METRIC CALCULATION
+# -----------------------------
+def compute_metrics(data_log, duration=100):
+    if not data_log:
+        return {}
+
+    df = pd.DataFrame(data_log)
+
+    # Only consider successful requests
+    df = df[df["status"] == "success"]
+
+    if df.empty:
+        return {}
+
+    avg_resp = df["latency"].mean()
+    p99_resp = df["latency"].quantile(0.99)
+
+    cpu_var = df.groupby("server")["cpu"].mean().var()
+    throughput = len(df) / duration
+
+    failure_rate = 1 - (len(df) / len(data_log))
+
+    return {
+        "avg_rt": float(avg_resp),
+        "p99": float(p99_resp),
+        "cpu_var": float(cpu_var),
+        "throughput": float(throughput),
+        "failure_rate": float(failure_rate)
+    }
+
+
+# -----------------------------
+# SINGLE LB EVALUATION (OLD STYLE)
+# -----------------------------
+def evaluate_lb(lb_class, model=None, duration=100):
     env = simpy.Environment()
+
     servers = [
         Server(env, "S0", speed_factor=1.0),
         Server(env, "S1", speed_factor=0.7),
         Server(env, "S2", speed_factor=1.3)
     ]
+
     data_log = []
-    lb = lb_class() if model is None else lb_class(model)
-    env.process(traffic_generator(env, servers, lb, data_log))
-    env.run(until=100)
-    df = pd.DataFrame(data_log)
-    avg_resp = df['response_time'].mean()
-    p99_resp = df['response_time'].quantile(0.99)
-    cpu_var = df.groupby('server')['cpu'].mean().var()
-    throughput = len(df)/100
-    return avg_resp, p99_resp, cpu_var, throughput
 
-results = {}
-results['RoundRobin'] = evaluate_lb(RoundRobinLB)
-results['LeastConnections'] = evaluate_lb(LeastConnectionsLB)
-results['MLLB'] = evaluate_lb(MLLB, rf)
-results['RLLB (Balanced)'] = evaluate_lb(lambda model: MLLB(model, cpu_penalty=0.5), rf)
+    if model is None:
+        lb = lb_class()
+    else:
+        lb = lb_class(model)
 
-# Print results
-for lb, metrics in results.items():
-    print(f"{lb}: Avg RT={metrics[0]:.2f}, P99 RT={metrics[1]:.2f}, CPU Var={metrics[2]:.2f}, Throughput={metrics[3]:.2f}")
+    # Request counter for tracking
+    request_counter = {"count": 0}
 
-# Dashboard
-labels = list(results.keys())
-avg_rt = [results[lb][0] for lb in labels]
-p99 = [results[lb][1] for lb in labels]
-cpu_var = [results[lb][2] for lb in labels]
+    env.process(
+        traffic_generator(
+            env,
+            servers,
+            lb,
+            data_log,
+            duration=duration,
+            request_counter=request_counter
+        )
+    )
 
-x = range(len(labels))
-plt.figure(figsize=(10,6))
-plt.bar([i-0.2 for i in x], avg_rt, 0.2, label='Avg RT')
-plt.bar(x, p99, 0.2, label='P99 RT')
-plt.bar([i+0.2 for i in x], cpu_var, 0.2, label='CPU Var')
-plt.xticks(x, labels)
-plt.ylabel('Metric Value')
-plt.title('Load Balancer Evaluation')
-plt.legend()
-plt.show()
+    env.run(until=duration)
+
+    return compute_metrics(data_log, duration)
+
+
+# -----------------------------
+# API FUNCTION (used by Flask)
+# -----------------------------
+def evaluate_all():
+    return {
+        "RoundRobin": evaluate_lb(RoundRobinLB),
+        "LeastConnections": evaluate_lb(LeastConnectionsLB),
+        "MLLB": evaluate_lb(MLLB, rf) if rf else {},
+        "RLLB": evaluate_lb(RLLB)
+    }
+
+
+# -----------------------------
+# 🔥 REQUEST LOG (for UI streaming)
+# -----------------------------
+def get_request_log(lb_type="rr", duration=50):
+    env = simpy.Environment()
+
+    servers = [
+        Server(env, "S0", speed_factor=1.0),
+        Server(env, "S1", speed_factor=0.7),
+        Server(env, "S2", speed_factor=1.3)
+    ]
+
+    data_log = []
+
+    # Request counter
+    request_counter = {"count": 0}
+
+    if lb_type == "rr":
+        lb = RoundRobinLB()
+    elif lb_type == "ml" and rf:
+        lb = MLLB(rf)
+    elif lb_type == "rl":
+        lb = RLLB()
+    else:
+        lb = LeastConnectionsLB()
+
+    env.process(
+        traffic_generator(
+            env,
+            servers,
+            lb,
+            data_log,
+            duration=duration,
+            request_counter=request_counter
+        )
+    )
+
+    env.run(until=duration)
+
+    return data_log
+
+
+# -----------------------------
+# CLI MODE (optional)
+# -----------------------------
+if __name__ == "__main__":
+    results = evaluate_all()
+
+    for lb, metrics in results.items():
+        print(
+            f"{lb}: "
+            f"Avg RT={metrics.get('avg_rt', 0):.2f}, "
+            f"P99={metrics.get('p99', 0):.2f}, "
+            f"CPU Var={metrics.get('cpu_var', 0):.2f}, "
+            f"Throughput={metrics.get('throughput', 0):.2f}, "
+            f"Failure Rate={metrics.get('failure_rate', 0):.2f}"
+        )
