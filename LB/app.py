@@ -1,16 +1,31 @@
 from flask import Flask, jsonify, render_template, request
-from evaluate import evaluate_all, get_request_log
-from simulation_manager import SimulationManager   # 🔥 NEW
+from simulation_manager import SimulationManager
 
 app = Flask(__name__)
 
 # -----------------------------
-# GLOBAL SIMULATION MANAGER
+# GLOBAL STATE
 # -----------------------------
 sim_manager = SimulationManager()
 
+current_strategy = None
+latest_index = 0
+
+
 # -----------------------------
-# ROUTES
+# SORT LOGS BY REQUEST ID
+# -----------------------------
+def get_sorted_logs(strategy):
+    logs = sim_manager.get_logs(strategy)
+
+    return sorted(
+        logs,
+        key=lambda x: x.get("request_id", 0)
+    )
+
+
+# -----------------------------
+# HOME
 # -----------------------------
 @app.route("/")
 def home():
@@ -23,19 +38,24 @@ def dashboard():
 
 
 # -----------------------------
-# ▶️ RUN BASELINE (RR / LC)
+# BASELINE
 # -----------------------------
 @app.route("/run/baseline", methods=["POST"])
 def run_baseline():
+    global current_strategy, latest_index
+
     traffic_mode = request.json.get("traffic", "mixed")
 
     sim_manager.run_baseline(traffic_mode)
+
+    current_strategy = "baseline"
+    latest_index = 0
 
     return jsonify({"status": "Baseline simulation completed"})
 
 
 # -----------------------------
-# 🧠 TRAIN ML
+# TRAIN ML
 # -----------------------------
 @app.route("/train/ml", methods=["POST"])
 def train_ml():
@@ -44,7 +64,7 @@ def train_ml():
 
 
 # -----------------------------
-# 🤖 TRAIN RL
+# TRAIN RL
 # -----------------------------
 @app.route("/train/rl", methods=["POST"])
 def train_rl():
@@ -53,20 +73,25 @@ def train_rl():
 
 
 # -----------------------------
-# 🚀 RUN SMART (ML / RL)
+# RUN SMART
 # -----------------------------
 @app.route("/run/smart", methods=["POST"])
 def run_smart():
-    strategy = request.json.get("strategy", "ml")  # "ml" or "rl"
+    global current_strategy, latest_index
+
+    strategy = request.json.get("strategy", "ml")
     traffic_mode = request.json.get("traffic", "mixed")
 
     sim_manager.run_smart(strategy, traffic_mode)
+
+    current_strategy = strategy
+    latest_index = 0
 
     return jsonify({"status": f"{strategy.upper()} simulation completed"})
 
 
 # -----------------------------
-# 📊 METRICS
+# METRICS
 # -----------------------------
 @app.route("/metrics")
 def metrics():
@@ -74,40 +99,48 @@ def metrics():
 
 
 # -----------------------------
-# 📡 TRAFFIC STREAM (REAL-TIME)
+# TRAFFIC STREAM
 # -----------------------------
-latest_index = 0
-
 @app.route("/traffic")
 def traffic():
-    global latest_index
+    global latest_index, current_strategy
 
-    data = get_request_log("rl")  # can switch dynamically later
+    if current_strategy is None:
+        return jsonify({})
 
-    if not data:
-        return jsonify({"message": "No data yet"})
+    logs = get_sorted_logs(current_strategy)
 
-    if latest_index >= len(data):
+    if not logs:
+        return jsonify({})
+
+    if latest_index >= len(logs):
         latest_index = 0
 
-    req = data[latest_index]
+    req = logs[latest_index]
     latest_index += 1
 
     return jsonify({
-        "request_id": req.get("request_id"),
+        "strategy": current_strategy.upper(),
+        "request_id": req.get("request_id", latest_index),
         "server": req.get("server"),
-        "latency": req.get("latency"),
-        "status": req.get("status"),
+        "latency": round(req.get("latency", 0), 2),
+        "status": req.get("status", "success"),
         "fallback": req.get("fallback_used", False)
     })
 
 
 # -----------------------------
-# 🔄 RESET SYSTEM
+# RESET
 # -----------------------------
 @app.route("/reset", methods=["POST"])
 def reset():
+    global current_strategy, latest_index
+
     sim_manager.reset()
+
+    current_strategy = None
+    latest_index = 0
+
     return jsonify({"status": "System reset complete"})
 
 

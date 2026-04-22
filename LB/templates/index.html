@@ -90,13 +90,32 @@
 
 <script>
 let chart;
+let trafficStarted = false;
+
+// -----------------------------
+// START TRAFFIC ONLY ONCE
+// -----------------------------
+function startTrafficIfNeeded() {
+    if (!trafficStarted) {
+        streamTraffic();
+        trafficStarted = true;
+    }
+}
 
 // -----------------------------
 // API CALLS
 // -----------------------------
 function runBaseline() {
-    fetch('/run/baseline', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({traffic: 'mixed'})})
-    .then(() => alert("Baseline done"));
+    fetch('/run/baseline', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({traffic: 'mixed'})
+    })
+    .then(() => {
+        alert("Baseline done");
+        startTrafficIfNeeded();
+        loadMetrics();
+    });
 }
 
 function trainML() {
@@ -115,14 +134,27 @@ function runSmart(type) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({strategy: type, traffic: 'mixed'})
     })
-    .then(() => alert(type + " simulation done"));
+    .then(() => {
+        alert(type + " simulation done");
+        startTrafficIfNeeded();
+        loadMetrics();
+    });
 }
 
 function resetSystem() {
     fetch('/reset', {method: 'POST'})
     .then(() => {
         alert("Reset complete");
+
         document.getElementById("trafficLog").innerHTML = "";
+
+        if (trafficInterval) {
+            clearInterval(trafficInterval);
+            trafficInterval = null;
+        }
+
+        trafficStarted = false;
+        loadMetrics();
     });
 }
 
@@ -133,9 +165,14 @@ function loadMetrics() {
     fetch('/metrics')
     .then(res => res.json())
     .then(data => {
-        document.getElementById("baselineMetrics").innerText = JSON.stringify(data.baseline, null, 2);
-        document.getElementById("mlMetrics").innerText = JSON.stringify(data.ml, null, 2);
-        document.getElementById("rlMetrics").innerText = JSON.stringify(data.rl, null, 2);
+        document.getElementById("baselineMetrics").innerText =
+            JSON.stringify(data.baseline || {}, null, 2);
+
+        document.getElementById("mlMetrics").innerText =
+            JSON.stringify(data.ml || {}, null, 2);
+
+        document.getElementById("rlMetrics").innerText =
+            JSON.stringify(data.rl || {}, null, 2);
 
         updateChart(data);
     });
@@ -162,7 +199,7 @@ function updateChart(data) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'Avg Latency',
+                label: 'Average Latency',
                 data: avgRT
             }]
         }
@@ -173,16 +210,17 @@ function updateChart(data) {
 // TRAFFIC STREAM
 // -----------------------------
 function streamTraffic() {
-    setInterval(() => {
+    trafficInterval = setInterval(() => {
         fetch('/traffic')
         .then(res => res.json())
         .then(data => {
-            if (!data.server) return;
+            if (!data.server || !data.strategy) return;
 
             const log = document.getElementById("trafficLog");
 
-            const msg = `Req ${data.request_id} → ${data.server} (${data.status}) ${data.fallback ? "⚠️ fallback" : ""}`;
-            
+            const msg =
+                `[${data.strategy}] Req ${data.request_id} → ${data.server} (${data.status}) ${data.fallback ? "⚠️ fallback" : ""}`;
+
             log.innerHTML += msg + "<br>";
             log.scrollTop = log.scrollHeight;
         });
@@ -190,10 +228,10 @@ function streamTraffic() {
 }
 
 // -----------------------------
-// AUTO LOAD
+// LOAD EMPTY METRICS ON PAGE LOAD
 // -----------------------------
+loadMetrics();
 setInterval(loadMetrics, 3000);
-streamTraffic();
 </script>
 
 </body>
